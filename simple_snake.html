@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake Mobile Simple</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        
+        canvas {
+            border: 2px solid white;
+            background: #111;
+            display: block;
+            margin: 20px auto;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            gap: 10px;
+            width: 200px;
+            height: 200px;
+            margin: 20px auto;
+        }
+        
+        button {
+            background: #333;
+            color: white;
+            border: 2px solid white;
+            font-size: 20px;
+            cursor: pointer;
+            border-radius: 10px;
+        }
+        
+        button:active {
+            background: #555;
+        }
+        
+        .up { grid-column: 2; grid-row: 1; }
+        .left { grid-column: 1; grid-row: 2; }
+        .sprint { grid-column: 2; grid-row: 2; background: #c00; }
+        .right { grid-column: 3; grid-row: 2; }
+        .down { grid-column: 2; grid-row: 3; }
+        
+        .game-btn {
+            width: 120px;
+            height: 40px;
+            margin: 10px;
+            background: #006600;
+        }
+        
+        .score {
+            font-size: 24px;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🐍 Snake Mobile</h1>
+    
+    <div class="score">Score: <span id="score">0</span></div>
+    
+    <canvas id="canvas" width="400" height="400"></canvas>
+    
+    <button class="game-btn" onclick="startGame()">🎮 JOUER</button>
+    <button class="game-btn" onclick="togglePause()">⏸️ PAUSE</button>
+    
+    <div class="controls">
+        <button class="up" onclick="setDirection(0, -1)">⬆️</button>
+        <button class="left" onclick="setDirection(-1, 0)">⬅️</button>
+        <button class="sprint" onmousedown="sprint=true" onmouseup="sprint=false" ontouchstart="sprint=true" ontouchend="sprint=false">🚀</button>
+        <button class="right" onclick="setDirection(1, 0)">➡️</button>
+        <button class="down" onclick="setDirection(0, 1)">⬇️</button>
+    </div>
+    
+    <p>🔴 Mangez les fruits rouges pour grandir !</p>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        
+        const CELL = 20;
+        const WIDTH = canvas.width / CELL;
+        const HEIGHT = canvas.height / CELL;
+        
+        let snake = [{x: 10, y: 10}];
+        let direction = {x: 1, y: 0};
+        let nextDirection = {x: 1, y: 0};
+        let food = [];
+        let score = 0;
+        let running = false;
+        let paused = false;
+        let sprint = false;
+        
+        function startGame() {
+            snake = [{x: 10, y: 10}];
+            direction = {x: 1, y: 0};
+            nextDirection = {x: 1, y: 0};
+            food = [];
+            score = 0;
+            running = true;
+            paused = false;
+            
+            spawnFood();
+            updateScore();
+            gameLoop();
+        }
+        
+        function spawnFood() {
+            while (food.length < 3) {
+                let pos = {
+                    x: Math.floor(Math.random() * WIDTH),
+                    y: Math.floor(Math.random() * HEIGHT)
+                };
+                
+                let occupied = snake.some(s => s.x === pos.x && s.y === pos.y) ||
+                              food.some(f => f.x === pos.x && f.y === pos.y);
+                
+                if (!occupied) {
+                    food.push(pos);
+                }
+            }
+        }
+        
+        function setDirection(x, y) {
+            if (!running) return;
+            if ((x !== 0 && direction.x !== -x) || (y !== 0 && direction.y !== -y)) {
+                nextDirection = {x, y};
+            }
+        }
+        
+        function togglePause() {
+            if (running) paused = !paused;
+        }
+        
+        function updateScore() {
+            scoreEl.textContent = score;
+        }
+        
+        function move() {
+            if (paused || !running) return;
+            
+            direction = {...nextDirection};
+            
+            let head = {
+                x: snake[0].x + direction.x,
+                y: snake[0].y + direction.y
+            };
+            
+            // Collision bords
+            if (head.x < 0 || head.x >= WIDTH || head.y < 0 || head.y >= HEIGHT) {
+                gameOver();
+                return;
+            }
+            
+            // Collision soi-même
+            if (snake.some(s => s.x === head.x && s.y === head.y)) {
+                gameOver();
+                return;
+            }
+            
+            snake.unshift(head);
+            
+            // Manger nourriture
+            let foodIndex = food.findIndex(f => f.x === head.x && f.y === head.y);
+            if (foodIndex !== -1) {
+                food.splice(foodIndex, 1);
+                score++;
+                updateScore();
+                spawnFood();
+            } else {
+                snake.pop();
+            }
+        }
+        
+        function draw() {
+            // Fond
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Snake
+            ctx.fillStyle = '#0f0';
+            snake.forEach((s, i) => {
+                ctx.fillRect(s.x * CELL, s.y * CELL, CELL - 2, CELL - 2);
+                if (i === 0) {
+                    // Yeux
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(s.x * CELL + 5, s.y * CELL + 5, 3, 3);
+                    ctx.fillRect(s.x * CELL + 12, s.y * CELL + 5, 3, 3);
+                    ctx.fillStyle = '#0f0';
+                }
+            });
+            
+            // Nourriture
+            ctx.fillStyle = '#f00';
+            food.forEach(f => {
+                ctx.fillRect(f.x * CELL, f.y * CELL, CELL - 2, CELL - 2);
+            });
+            
+            // Pause
+            if (paused) {
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = '30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('PAUSE', canvas.width/2, canvas.height/2);
+            }
+        }
+        
+        function gameOver() {
+            running = false;
+            alert(`Game Over! Score: ${score}`);
+        }
+        
+        function gameLoop() {
+            if (!running) return;
+            
+            move();
+            draw();
+            
+            let speed = sprint ? 100 : 200;
+            setTimeout(gameLoop, speed);
+        }
+        
+        // Contrôles clavier
+        document.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowUp': setDirection(0, -1); break;
+                case 'ArrowDown': setDirection(0, 1); break;
+                case 'ArrowLeft': setDirection(-1, 0); break;
+                case 'ArrowRight': setDirection(1, 0); break;
+                case ' ': sprint = true; e.preventDefault(); break;
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === ' ') sprint = false;
+        });
+        
+        // Initialisation
+        draw();
+    </script>
+</body>
+</html>

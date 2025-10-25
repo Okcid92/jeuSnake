@@ -1,0 +1,1277 @@
+import pygame
+import random
+import sys
+import json
+import os
+import math
+import time
+
+# Initialisation
+pygame.init()
+pygame.mixer.init()
+
+WIDTH, HEIGHT = 1200, 800
+CELL_SIZE = 20
+GRID_WIDTH = WIDTH // CELL_SIZE
+GRID_HEIGHT = HEIGHT // CELL_SIZE
+
+# Couleurs
+BLACK = (0, 0, 0)
+DARK_BLUE = (0, 0, 50)
+GREEN = (0, 255, 0)
+DARK_GREEN = (0, 150, 0)
+LIGHT_GREEN = (100, 255, 100)
+RED = (255, 0, 0)
+BLUE = (0, 100, 255)
+GOLD = (255, 215, 0)
+PURPLE = (128, 0, 128)
+WHITE = (255, 255, 255)
+GRAY = (128, 128, 128)
+ORANGE = (255, 165, 0)
+CYAN = (0, 255, 255)
+PINK = (255, 192, 203)
+YELLOW = (255, 255, 0)
+
+# Types de fruits et power-ups
+FRUIT_NORMAL = 0
+FRUIT_BONUS = 1
+FRUIT_SLOW = 2
+FRUIT_SHRINK = 3
+FRUIT_GHOST = 4
+FRUIT_SPEED = 5
+FRUIT_TELEPORT = 6
+FRUIT_INVINCIBLE = 7
+
+# Modes de jeu
+MODE_CLASSIC = 0
+MODE_PORTAL = 1
+MODE_OBSTACLES = 2
+MODE_SURVIVAL = 3
+MODE_COOPERATIVE = 4
+
+class Trail:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.life = 20
+        self.max_life = 20
+        
+    def update(self):
+        self.life -= 1
+        
+    def draw(self, screen):
+        if self.life > 0:
+            alpha = self.life / self.max_life
+            color = tuple(int(c * alpha) for c in self.color)
+            rect = pygame.Rect(self.x * CELL_SIZE + 5, self.y * CELL_SIZE + 5, 
+                             CELL_SIZE - 10, CELL_SIZE - 10)
+            pygame.draw.rect(screen, color, rect)
+
+class Explosion:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.particles = []
+        for _ in range(20):
+            self.particles.append({
+                'x': x,
+                'y': y,
+                'vx': random.uniform(-5, 5),
+                'vy': random.uniform(-5, 5),
+                'life': 60,
+                'color': random.choice([RED, ORANGE, YELLOW])
+            })
+    
+    def update(self):
+        for particle in self.particles[:]:
+            particle['x'] += particle['vx']
+            particle['y'] += particle['vy']
+            particle['vx'] *= 0.98
+            particle['vy'] *= 0.98
+            particle['life'] -= 1
+            if particle['life'] <= 0:
+                self.particles.remove(particle)
+    
+    def draw(self, screen):
+        for particle in self.particles:
+            if particle['life'] > 0:
+                alpha = particle['life'] / 60
+                size = int(5 * alpha)
+                if size > 0:
+                    pygame.draw.circle(screen, particle['color'], 
+                                     (int(particle['x']), int(particle['y'])), size)
+
+class Particle:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.vx = random.uniform(-2, 2)
+        self.vy = random.uniform(-2, 2)
+        self.color = color
+        self.life = 30
+        self.max_life = 30
+        
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.life -= 1
+        
+    def draw(self, screen):
+        if self.life > 0:
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), 3)
+
+class Obstacle:
+    def __init__(self, x, y, moving=False):
+        self.x = x
+        self.y = y
+        self.moving = moving
+        self.direction = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+        self.move_timer = 0
+        
+    def update(self):
+        if self.moving:
+            self.move_timer += 1
+            if self.move_timer > 60:
+                self.direction = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+                self.move_timer = 0
+                
+            new_x = self.x + self.direction[0]
+            new_y = self.y + self.direction[1]
+            
+            if 0 <= new_x < GRID_WIDTH and 0 <= new_y < GRID_HEIGHT:
+                self.x = new_x
+                self.y = new_y
+
+class PowerUp:
+    def __init__(self, pos, fruit_type):
+        self.pos = pos
+        self.type = fruit_type
+        self.timer = 0
+        self.animation_timer = 0
+        
+    def get_color(self):
+        colors = {
+            FRUIT_NORMAL: RED,
+            FRUIT_BONUS: BLUE,
+            FRUIT_SLOW: GOLD,
+            FRUIT_SHRINK: PURPLE,
+            FRUIT_GHOST: CYAN,
+            FRUIT_SPEED: ORANGE,
+            FRUIT_TELEPORT: PINK,
+            FRUIT_INVINCIBLE: YELLOW
+        }
+        return colors[self.type]
+        
+    def get_points(self):
+        points = {
+            FRUIT_NORMAL: 1,
+            FRUIT_BONUS: 5,
+            FRUIT_SLOW: 2,
+            FRUIT_SHRINK: 3,
+            FRUIT_GHOST: 4,
+            FRUIT_SPEED: 3,
+            FRUIT_TELEPORT: 6,
+            FRUIT_INVINCIBLE: 8
+        }
+        return points[self.type]
+
+class Snake:
+    def __init__(self, color=GREEN, start_pos=None):
+        if start_pos is None:
+            start_pos = (GRID_WIDTH//2, GRID_HEIGHT//2)
+        self.body = [start_pos]
+        self.direction = (1, 0)
+        self.color = color
+        self.ghost_timer = 0
+        self.speed_boost_timer = 0
+        self.invincible_timer = 0
+        self.teleport_charges = 0
+        self.trail = []
+        
+    def move(self):
+        head = (self.body[0][0] + self.direction[0], self.body[0][1] + self.direction[1])
+        self.body.insert(0, head)
+        
+    def grow(self):
+        pass
+        
+    def shrink(self):
+        if len(self.body) > 1:
+            self.body.pop()
+            
+    def apply_shrink(self):
+        for _ in range(3):
+            if len(self.body) > 1:
+                self.body.pop()
+    
+    def teleport(self):
+        if self.teleport_charges > 0:
+            # Téléporter à une position aléatoire
+            for _ in range(100):  # Essayer 100 fois
+                new_x = random.randint(5, GRID_WIDTH-5)
+                new_y = random.randint(5, GRID_HEIGHT-5)
+                if (new_x, new_y) not in self.body:
+                    self.body[0] = (new_x, new_y)
+                    self.teleport_charges -= 1
+                    return True
+        return False
+        
+    def check_collision(self, obstacles=None, portal_mode=False):
+        head = self.body[0]
+        
+        # Mode portail : téléportation
+        if portal_mode:
+            new_head = list(head)
+            if head[0] < 0:
+                new_head[0] = GRID_WIDTH - 1
+            elif head[0] >= GRID_WIDTH:
+                new_head[0] = 0
+            if head[1] < 0:
+                new_head[1] = GRID_HEIGHT - 1
+            elif head[1] >= GRID_HEIGHT:
+                new_head[1] = 0
+            self.body[0] = tuple(new_head)
+            head = self.body[0]
+        else:
+            # Collision avec les bords (sauf si invincible)
+            if self.invincible_timer <= 0:
+                if head[0] < 0 or head[0] >= GRID_WIDTH or head[1] < 0 or head[1] >= GRID_HEIGHT:
+                    return True
+        
+        # Collision avec soi-même (sauf en mode fantôme ou invincible)
+        if self.ghost_timer <= 0 and self.invincible_timer <= 0 and head in self.body[1:]:
+            return True
+            
+        # Collision avec obstacles (sauf si invincible)
+        if obstacles and self.invincible_timer <= 0:
+            for obstacle in obstacles:
+                if head == (obstacle.x, obstacle.y):
+                    return True
+                    
+        return False
+
+class Game:
+    def __init__(self):
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Snake MEGA Ultimate Edition")
+        self.clock = pygame.time.Clock()
+        
+        # État du jeu
+        self.game_mode = MODE_CLASSIC
+        self.multiplayer = False
+        self.cooperative_mode = False
+        self.snake1 = Snake(GREEN)
+        self.snake2 = Snake(BLUE, (GRID_WIDTH//4, GRID_HEIGHT//2))
+        
+        self.foods = []
+        self.obstacles = []
+        self.particles = []
+        self.trails = []
+        self.explosions = []
+        
+        # Scores et statistiques
+        self.score1 = 0
+        self.score2 = 0
+        self.best_score = self.load_best_score()
+        self.games_played = self.load_stats().get('games_played', 0)
+        self.total_time = self.load_stats().get('total_time', 0)
+        
+        # Mode survie
+        self.survival_time = 120  # 2 minutes
+        self.survival_timer = 0
+        
+        # Interface
+        self.font = pygame.font.Font(None, 36)
+        self.small_font = pygame.font.Font(None, 24)
+        self.big_font = pygame.font.Font(None, 48)
+        
+        # Effets et timers
+        self.sprinting1 = False
+        self.sprinting2 = False
+        self.base_speed = 8
+        self.sprint_multiplier = 2
+        self.slow_effect = False
+        self.slow_timer = 0
+        self.level = 1
+        self.start_time = pygame.time.get_ticks()
+        
+        # Nouvelles fonctionnalités
+        self.paused = False
+        self.night_mode = False
+        self.zoom_level = 1.0
+        self.volume = 0.5
+        self.show_trails = True
+        self.auto_boost_timer = 0
+        self.replay_data = []
+        self.recording = True
+        
+        # Menu
+        self.in_menu = True
+        self.menu_selection = 0
+        self.menu_options = [
+            "Mode Classique",
+            "Mode Portails", 
+            "Mode Obstacles",
+            "Mode Survie",
+            "Multijoueur Compétitif",
+            "Multijoueur Coopératif",
+            "Options",
+            "Quitter"
+        ]
+        
+        # Menu options
+        self.in_options = False
+        self.options_selection = 0
+        self.options_menu = [
+            "Volume",
+            "Traînées",
+            "Mode Nuit",
+            "Zoom",
+            "Retour"
+        ]
+        
+        # Thèmes visuels
+        self.theme = 0
+        self.themes = [
+            {"bg": BLACK, "grid": GRAY},
+            {"bg": DARK_BLUE, "grid": BLUE},
+            {"bg": (20, 20, 20), "grid": (40, 40, 40)}
+        ]
+        
+        # Musique de fond
+        self.music_notes = [440, 494, 523, 587, 659, 698, 784]  # Gamme de Do
+        self.music_timer = 0
+        self.current_note = 0
+        
+        self.create_sounds()
+        self.create_background_pattern()
+        
+    def create_sounds(self):
+        try:
+            self.eat_sound = pygame.mixer.Sound(buffer=self.generate_tone(800, 0.1))
+            self.powerup_sound = pygame.mixer.Sound(buffer=self.generate_tone(1200, 0.2))
+            self.gameover_sound = pygame.mixer.Sound(buffer=self.generate_tone(200, 0.5))
+            self.level_up_sound = pygame.mixer.Sound(buffer=self.generate_chord([440, 554, 659], 0.3))
+            self.teleport_sound = pygame.mixer.Sound(buffer=self.generate_tone(1500, 0.15))
+            self.pause_sound = pygame.mixer.Sound(buffer=self.generate_tone(600, 0.1))
+            
+            # Ajuster le volume
+            for sound in [self.eat_sound, self.powerup_sound, self.gameover_sound, 
+                         self.level_up_sound, self.teleport_sound, self.pause_sound]:
+                if sound:
+                    sound.set_volume(self.volume)
+        except:
+            self.eat_sound = None
+            self.powerup_sound = None
+            self.gameover_sound = None
+            self.level_up_sound = None
+            self.teleport_sound = None
+            self.pause_sound = None
+    
+    def generate_tone(self, frequency, duration):
+        sample_rate = 22050
+        frames = int(duration * sample_rate)
+        arr = []
+        for i in range(frames):
+            wave = 2048 * math.sin(frequency * 2 * math.pi * i / sample_rate)
+            arr.append([int(wave), int(wave)])
+        return pygame.sndarray.array(arr)
+        
+    def generate_chord(self, frequencies, duration):
+        sample_rate = 22050
+        frames = int(duration * sample_rate)
+        arr = []
+        for i in range(frames):
+            wave = 0
+            for freq in frequencies:
+                wave += 1024 * math.sin(freq * 2 * math.pi * i / sample_rate)
+            arr.append([int(wave), int(wave)])
+        return pygame.sndarray.array(arr)
+        
+    def play_background_music(self):
+        self.music_timer += 1
+        if self.music_timer > 120:  # Nouvelle note toutes les 2 secondes
+            try:
+                note_sound = pygame.mixer.Sound(buffer=self.generate_tone(
+                    self.music_notes[self.current_note], 0.5))
+                note_sound.set_volume(self.volume * 0.3)  # Plus faible que les effets
+                note_sound.play()
+                self.current_note = (self.current_note + 1) % len(self.music_notes)
+                self.music_timer = 0
+            except:
+                pass
+        
+    def create_background_pattern(self):
+        self.bg_surface = pygame.Surface((WIDTH, HEIGHT))
+        bg_color = self.themes[self.theme]["bg"]
+        if self.night_mode:
+            bg_color = tuple(255 - c for c in bg_color)
+        self.bg_surface.fill(bg_color)
+            
+    def load_best_score(self):
+        try:
+            if os.path.exists('game_data.json'):
+                with open('game_data.json', 'r') as f:
+                    return json.load(f).get('best_score', 0)
+        except:
+            pass
+        return 0
+        
+    def load_stats(self):
+        try:
+            if os.path.exists('game_data.json'):
+                with open('game_data.json', 'r') as f:
+                    return json.load(f)
+        except:
+            pass
+        return {}
+        
+    def save_game_data(self):
+        try:
+            data = {
+                'best_score': self.best_score,
+                'games_played': self.games_played,
+                'total_time': self.total_time,
+                'volume': self.volume,
+                'show_trails': self.show_trails,
+                'night_mode': self.night_mode
+            }
+            with open('game_data.json', 'w') as f:
+                json.dump(data, f)
+        except:
+            pass
+    
+    def save_screenshot(self):
+        try:
+            timestamp = int(time.time())
+            filename = f"snake_screenshot_{timestamp}.png"
+            pygame.image.save(self.screen, filename)
+            return filename
+        except:
+            return None
+            
+    def create_obstacles(self, count=5):
+        self.obstacles = []
+        for _ in range(count):
+            while True:
+                x = random.randint(5, GRID_WIDTH-5)
+                y = random.randint(5, GRID_HEIGHT-5)
+                if (x, y) not in self.snake1.body and (not self.multiplayer or (x, y) not in self.snake2.body):
+                    moving = random.random() < 0.3
+                    self.obstacles.append(Obstacle(x, y, moving))
+                    break
+                    
+    def maintain_foods(self):
+        target_count = 15 if self.multiplayer else 10
+        if self.game_mode == MODE_SURVIVAL:
+            target_count = 20  # Plus de nourriture en mode survie
+            
+        while len(self.foods) < target_count:
+            occupied = set(self.snake1.body)
+            if self.multiplayer:
+                occupied |= set(self.snake2.body)
+            occupied |= set([f.pos for f in self.foods])
+            occupied |= set([(o.x, o.y) for o in self.obstacles])
+            
+            free_positions = []
+            for x in range(GRID_WIDTH):
+                for y in range(GRID_HEIGHT):
+                    if (x, y) not in occupied:
+                        free_positions.append((x, y))
+            
+            if not free_positions:
+                break
+                
+            pos = random.choice(free_positions)
+            
+            # Probabilités étendues avec nouveaux fruits
+            rand = random.random()
+            if rand < 0.4:  # 40% fruits normaux
+                fruit_type = FRUIT_NORMAL
+            elif rand < 0.55:  # 15% fruits bonus
+                fruit_type = FRUIT_BONUS
+            elif rand < 0.68:  # 13% fruits slow
+                fruit_type = FRUIT_SLOW
+            elif rand < 0.78:  # 10% fruits shrink
+                fruit_type = FRUIT_SHRINK
+            elif rand < 0.86:  # 8% fruits ghost
+                fruit_type = FRUIT_GHOST
+            elif rand < 0.92:  # 6% fruits speed
+                fruit_type = FRUIT_SPEED
+            elif rand < 0.97:  # 5% fruits teleport
+                fruit_type = FRUIT_TELEPORT
+            else:  # 3% fruits invincible
+                fruit_type = FRUIT_INVINCIBLE
+                
+            self.foods.append(PowerUp(pos, fruit_type))
+            
+    def handle_menu_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            elif event.type == pygame.KEYDOWN:
+                if self.in_options:
+                    return self.handle_options_events(event)
+                    
+                if event.key == pygame.K_UP:
+                    self.menu_selection = (self.menu_selection - 1) % len(self.menu_options)
+                elif event.key == pygame.K_DOWN:
+                    self.menu_selection = (self.menu_selection + 1) % len(self.menu_options)
+                elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                    if self.menu_selection == 0:  # Mode Classique
+                        self.start_game(MODE_CLASSIC, False, False)
+                    elif self.menu_selection == 1:  # Mode Portails
+                        self.start_game(MODE_PORTAL, False, False)
+                    elif self.menu_selection == 2:  # Mode Obstacles
+                        self.start_game(MODE_OBSTACLES, False, False)
+                    elif self.menu_selection == 3:  # Mode Survie
+                        self.start_game(MODE_SURVIVAL, False, False)
+                    elif self.menu_selection == 4:  # Multijoueur Compétitif
+                        self.start_game(MODE_CLASSIC, True, False)
+                    elif self.menu_selection == 5:  # Multijoueur Coopératif
+                        self.start_game(MODE_COOPERATIVE, True, True)
+                    elif self.menu_selection == 6:  # Options
+                        self.in_options = True
+                    elif self.menu_selection == 7:  # Quitter
+                        return False
+                elif event.key == pygame.K_t:  # Changer de thème
+                    self.theme = (self.theme + 1) % len(self.themes)
+                    self.create_background_pattern()
+        return True
+    
+    def handle_options_events(self, event):
+        if event.key == pygame.K_UP:
+            self.options_selection = (self.options_selection - 1) % len(self.options_menu)
+        elif event.key == pygame.K_DOWN:
+            self.options_selection = (self.options_selection + 1) % len(self.options_menu)
+        elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+            if self.options_selection == 0:  # Volume
+                self.volume = (self.volume + 0.1) % 1.1
+                if self.volume > 1.0:
+                    self.volume = 0.0
+                self.create_sounds()
+            elif self.options_selection == 1:  # Traînées
+                self.show_trails = not self.show_trails
+            elif self.options_selection == 2:  # Mode Nuit
+                self.night_mode = not self.night_mode
+                self.create_background_pattern()
+            elif self.options_selection == 3:  # Zoom
+                self.zoom_level += 0.2
+                if self.zoom_level > 2.0:
+                    self.zoom_level = 0.8
+            elif self.options_selection == 4:  # Retour
+                self.in_options = False
+        elif event.key == pygame.K_ESCAPE:
+            self.in_options = False
+        return True
+        
+    def start_game(self, mode, multiplayer, cooperative):
+        self.game_mode = mode
+        self.multiplayer = multiplayer
+        self.cooperative_mode = cooperative
+        self.in_menu = False
+        
+        # Réinitialiser le jeu
+        self.snake1 = Snake(GREEN)
+        if multiplayer:
+            self.snake2 = Snake(BLUE, (GRID_WIDTH//4, GRID_HEIGHT//2))
+        
+        self.foods = []
+        self.obstacles = []
+        self.particles = []
+        self.trails = []
+        self.explosions = []
+        self.score1 = 0
+        self.score2 = 0
+        self.level = 1
+        self.start_time = pygame.time.get_ticks()
+        self.paused = False
+        self.replay_data = []
+        self.recording = True
+        
+        if mode == MODE_OBSTACLES:
+            self.create_obstacles()
+        elif mode == MODE_SURVIVAL:
+            self.survival_timer = self.survival_time * 60  # Convertir en frames
+            
+    def handle_game_events(self):
+        keys = pygame.key.get_pressed()
+        
+        # Contrôles Joueur 1
+        self.sprinting1 = keys[pygame.K_SPACE]
+        
+        # Contrôles Joueur 2 (si multijoueur)
+        if self.multiplayer:
+            self.sprinting2 = keys[pygame.K_RSHIFT]
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.in_menu = True
+                    return True
+                elif event.key == pygame.K_p:  # Pause
+                    self.paused = not self.paused
+                    if self.pause_sound:
+                        self.pause_sound.play()
+                elif event.key == pygame.K_n:  # Mode nuit
+                    self.night_mode = not self.night_mode
+                    self.create_background_pattern()
+                elif event.key == pygame.K_s and keys[pygame.K_LCTRL]:  # Screenshot
+                    filename = self.save_screenshot()
+                    if filename:
+                        print(f"Screenshot sauvé: {filename}")
+                elif event.key == pygame.K_t and not self.multiplayer:  # Téléportation
+                    if self.snake1.teleport():
+                        if self.teleport_sound:
+                            self.teleport_sound.play()
+                    
+                # Contrôles Joueur 1 (flèches)
+                if event.key == pygame.K_UP and self.snake1.direction != (0, 1):
+                    self.snake1.direction = (0, -1)
+                elif event.key == pygame.K_DOWN and self.snake1.direction != (0, -1):
+                    self.snake1.direction = (0, 1)
+                elif event.key == pygame.K_LEFT and self.snake1.direction != (1, 0):
+                    self.snake1.direction = (-1, 0)
+                elif event.key == pygame.K_RIGHT and self.snake1.direction != (-1, 0):
+                    self.snake1.direction = (1, 0)
+                    
+                # Contrôles Joueur 2 (WASD)
+                if self.multiplayer:
+                    if event.key == pygame.K_w and self.snake2.direction != (0, 1):
+                        self.snake2.direction = (0, -1)
+                    elif event.key == pygame.K_s and self.snake2.direction != (0, -1):
+                        self.snake2.direction = (0, 1)
+                    elif event.key == pygame.K_a and self.snake2.direction != (1, 0):
+                        self.snake2.direction = (-1, 0)
+                    elif event.key == pygame.K_d and self.snake2.direction != (-1, 0):
+                        self.snake2.direction = (1, 0)
+                    elif event.key == pygame.K_LSHIFT:  # Téléportation J2
+                        if self.snake2.teleport():
+                            if self.teleport_sound:
+                                self.teleport_sound.play()
+        return True
+        
+    def update_snake(self, snake, player_num):
+        if self.paused:
+            return True
+            
+        snake.move()
+        
+        # Ajouter traînée
+        if self.show_trails and len(snake.body) > 1:
+            tail = snake.body[-1]
+            self.trails.append(Trail(tail[0], tail[1], snake.color))
+        
+        # Mettre à jour les timers d'effets
+        if snake.ghost_timer > 0:
+            snake.ghost_timer -= 1
+        if snake.speed_boost_timer > 0:
+            snake.speed_boost_timer -= 1
+        if snake.invincible_timer > 0:
+            snake.invincible_timer -= 1
+        
+        # Enregistrer pour replay
+        if self.recording:
+            self.replay_data.append({
+                'time': pygame.time.get_ticks(),
+                'snake': player_num,
+                'pos': snake.body[0],
+                'direction': snake.direction
+            })
+        
+        # Vérifier consommation de nourriture
+        head = snake.body[0]
+        for food in self.foods[:]:
+            if head == food.pos:
+                snake.grow()
+                self.foods.remove(food)
+                points = food.get_points()
+                
+                if player_num == 1:
+                    self.score1 += points
+                else:
+                    self.score2 += points
+                
+                # Créer des particules
+                for _ in range(15):
+                    self.particles.append(Particle(
+                        head[0] * CELL_SIZE + CELL_SIZE//2,
+                        head[1] * CELL_SIZE + CELL_SIZE//2,
+                        food.get_color()
+                    ))
+                
+                # Effets spéciaux
+                if food.type == FRUIT_BONUS:
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                elif food.type == FRUIT_SLOW:
+                    self.slow_effect = True
+                    self.slow_timer = max(self.slow_timer, 300)
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                elif food.type == FRUIT_SHRINK:
+                    snake.apply_shrink()
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                elif food.type == FRUIT_GHOST:
+                    snake.ghost_timer = 180
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                elif food.type == FRUIT_SPEED:
+                    snake.speed_boost_timer = 300
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                elif food.type == FRUIT_TELEPORT:
+                    snake.teleport_charges += 3
+                    if self.teleport_sound:
+                        self.teleport_sound.play()
+                elif food.type == FRUIT_INVINCIBLE:
+                    snake.invincible_timer = 600  # 10 secondes
+                    if self.powerup_sound:
+                        self.powerup_sound.play()
+                else:
+                    if self.eat_sound:
+                        self.eat_sound.play()
+                
+                # Calculer le niveau
+                if self.cooperative_mode:
+                    total_score = self.score1 + self.score2
+                else:
+                    total_score = self.score1 + (self.score2 if self.multiplayer else 0)
+                    
+                new_level = (total_score // 15) + 1
+                if new_level > self.level:
+                    self.level = new_level
+                    if self.level_up_sound:
+                        self.level_up_sound.play()
+                break
+        else:
+            snake.shrink()
+            
+        # Vérifier collisions
+        portal_mode = (self.game_mode == MODE_PORTAL)
+        obstacles = self.obstacles if self.game_mode == MODE_OBSTACLES else None
+        
+        if snake.check_collision(obstacles, portal_mode):
+            # Créer explosion
+            head = snake.body[0]
+            self.explosions.append(Explosion(
+                head[0] * CELL_SIZE + CELL_SIZE//2,
+                head[1] * CELL_SIZE + CELL_SIZE//2
+            ))
+            return False
+            
+        # Collision entre snakes en multijoueur (sauf en coopératif)
+        if self.multiplayer and not self.cooperative_mode:
+            other_snake = self.snake2 if player_num == 1 else self.snake1
+            if (snake.ghost_timer <= 0 and snake.invincible_timer <= 0 and 
+                head in other_snake.body):
+                return False
+                
+        return True
+        
+    def update_game(self):
+        if self.paused:
+            return True
+            
+        # Mettre à jour les obstacles mobiles
+        for obstacle in self.obstacles:
+            obstacle.update()
+            
+        # Maintenir la nourriture
+        self.maintain_foods()
+        
+        # Mettre à jour les timers globaux
+        if self.slow_timer > 0:
+            self.slow_timer -= 1
+            if self.slow_timer == 0:
+                self.slow_effect = False
+        
+        # Auto-boost périodique
+        self.auto_boost_timer += 1
+        if self.auto_boost_timer > 1800:  # Toutes les 30 secondes
+            if not self.multiplayer:
+                self.snake1.speed_boost_timer = 180  # 3 secondes
+            self.auto_boost_timer = 0
+        
+        # Mode survie
+        if self.game_mode == MODE_SURVIVAL:
+            self.survival_timer -= 1
+            if self.survival_timer <= 0:
+                return False  # Temps écoulé = victoire
+        
+        # Mettre à jour les particules
+        for particle in self.particles[:]:
+            particle.update()
+            if particle.life <= 0:
+                self.particles.remove(particle)
+        
+        # Mettre à jour les traînées
+        for trail in self.trails[:]:
+            trail.update()
+            if trail.life <= 0:
+                self.trails.remove(trail)
+        
+        # Mettre à jour les explosions
+        for explosion in self.explosions[:]:
+            explosion.update()
+            if not explosion.particles:
+                self.explosions.remove(explosion)
+        
+        # Jouer musique de fond
+        if not self.paused:
+            self.play_background_music()
+        
+        # Mettre à jour les snakes
+        if not self.update_snake(self.snake1, 1):
+            return False
+            
+        if self.multiplayer and not self.update_snake(self.snake2, 2):
+            return False
+            
+        return True
+        
+    def get_current_speed(self, snake, sprinting):
+        base = self.base_speed + (self.level - 1) * 1.5
+        
+        if self.slow_effect:
+            base = max(4, base // 2)
+            
+        if snake.speed_boost_timer > 0:
+            base *= 1.5
+            
+        if sprinting:
+            base *= self.sprint_multiplier
+            
+        return min(int(base), 30)
+        
+    def draw_menu(self):
+        self.screen.blit(self.bg_surface, (0, 0))
+        
+        # Titre avec effet
+        title = self.big_font.render("SNAKE MEGA ULTIMATE", True, WHITE)
+        title_rect = title.get_rect(center=(WIDTH//2, 120))
+        
+        # Effet d'ombre
+        shadow = self.big_font.render("SNAKE MEGA ULTIMATE", True, GRAY)
+        shadow_rect = shadow.get_rect(center=(WIDTH//2 + 3, 123))
+        self.screen.blit(shadow, shadow_rect)
+        self.screen.blit(title, title_rect)
+        
+        if self.in_options:
+            self.draw_options_menu()
+        else:
+            self.draw_main_menu()
+    
+    def draw_main_menu(self):
+        # Options du menu
+        for i, option in enumerate(self.menu_options):
+            color = WHITE if i == self.menu_selection else GRAY
+            if i == self.menu_selection:
+                pygame.draw.rect(self.screen, (50, 50, 50), 
+                               (WIDTH//2 - 150, 200 + i * 40 - 5, 300, 35))
+            
+            text = self.font.render(option, True, color)
+            text_rect = text.get_rect(center=(WIDTH//2, 220 + i * 40))
+            self.screen.blit(text, text_rect)
+        
+        # Instructions
+        instructions = [
+            "Flèches: Naviguer | ENTRÉE: Sélectionner",
+            "T: Changer de thème",
+            f"Meilleur score: {self.best_score}",
+            f"Parties jouées: {self.games_played}",
+            f"Temps total: {self.total_time//60}min"
+        ]
+        
+        for i, instruction in enumerate(instructions):
+            text = self.small_font.render(instruction, True, WHITE)
+            text_rect = text.get_rect(center=(WIDTH//2, 550 + i * 25))
+            self.screen.blit(text, text_rect)
+    
+    def draw_options_menu(self):
+        # Titre options
+        options_title = self.font.render("OPTIONS", True, WHITE)
+        options_rect = options_title.get_rect(center=(WIDTH//2, 180))
+        self.screen.blit(options_title, options_rect)
+        
+        # Options
+        option_values = [
+            f"Volume: {int(self.volume * 100)}%",
+            f"Traînées: {'ON' if self.show_trails else 'OFF'}",
+            f"Mode Nuit: {'ON' if self.night_mode else 'OFF'}",
+            f"Zoom: {self.zoom_level:.1f}x",
+            "Retour"
+        ]
+        
+        for i, (option, value) in enumerate(zip(self.options_menu, option_values)):
+            color = WHITE if i == self.options_selection else GRAY
+            if i == self.options_selection:
+                pygame.draw.rect(self.screen, (50, 50, 50), 
+                               (WIDTH//2 - 150, 230 + i * 40 - 5, 300, 35))
+            
+            if i < len(option_values) - 1:
+                text = self.small_font.render(value, True, color)
+            else:
+                text = self.font.render(option, True, color)
+            text_rect = text.get_rect(center=(WIDTH//2, 250 + i * 40))
+            self.screen.blit(text, text_rect)
+            
+    def draw_snake(self, snake):
+        for i, segment in enumerate(snake.body):
+            # Couleur avec dégradé
+            if i == 0:  # Tête
+                color = snake.color
+                if snake.ghost_timer > 0:
+                    alpha = 128 + int(127 * math.sin(pygame.time.get_ticks() * 0.02))
+                    color = (*color[:3], alpha)
+                elif snake.invincible_timer > 0:
+                    # Effet scintillant pour invincibilité
+                    brightness = abs(math.sin(pygame.time.get_ticks() * 0.05)) * 0.5 + 0.5
+                    color = tuple(int(c * brightness + 255 * (1 - brightness)) for c in color)
+            else:  # Corps
+                fade = max(0.3, 1 - (i * 0.05))
+                color = tuple(int(c * fade) for c in snake.color)
+            
+            # Appliquer mode nuit
+            if self.night_mode:
+                color = tuple(255 - c for c in color)
+            
+            rect = pygame.Rect(segment[0] * CELL_SIZE, segment[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(self.screen, color, rect)
+            
+            # Bordures et effets
+            if i == 0:
+                border_color = WHITE if not self.night_mode else BLACK
+                pygame.draw.rect(self.screen, border_color, rect, 2)
+                # Yeux
+                eye_color = BLACK if not self.night_mode else WHITE
+                eye_size = 3
+                pygame.draw.circle(self.screen, border_color, 
+                                 (rect.centerx - 5, rect.centery - 3), eye_size)
+                pygame.draw.circle(self.screen, border_color,
+                                 (rect.centerx + 5, rect.centery - 3), eye_size)
+                pygame.draw.circle(self.screen, eye_color,
+                                 (rect.centerx - 5, rect.centery - 3), 1)
+                pygame.draw.circle(self.screen, eye_color,
+                                 (rect.centerx + 5, rect.centery - 3), 1)
+            else:
+                border_color = WHITE if not self.night_mode else BLACK
+                pygame.draw.rect(self.screen, border_color, rect, 1)
+                
+    def draw_game(self):
+        self.screen.blit(self.bg_surface, (0, 0))
+        
+        # Dessiner les traînées
+        if self.show_trails:
+            for trail in self.trails:
+                trail.draw(self.screen)
+        
+        # Dessiner les obstacles
+        for obstacle in self.obstacles:
+            rect = pygame.Rect(obstacle.x * CELL_SIZE, obstacle.y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            color = ORANGE if obstacle.moving else GRAY
+            if self.night_mode:
+                color = tuple(255 - c for c in color)
+            pygame.draw.rect(self.screen, color, rect)
+            border_color = WHITE if not self.night_mode else BLACK
+            pygame.draw.rect(self.screen, border_color, rect, 2)
+            
+        # Dessiner les nourritures avec animations
+        for food in self.foods:
+            color = food.get_color()
+            if self.night_mode:
+                color = tuple(255 - c for c in color)
+            
+            # Effets spéciaux selon le type
+            if food.type != FRUIT_NORMAL:
+                brightness = abs(math.sin(pygame.time.get_ticks() * 0.01)) * 0.4 + 0.6
+                color = tuple(int(c * brightness) for c in color)
+                
+                # Effet de pulsation
+                size_mod = int(4 * math.sin(pygame.time.get_ticks() * 0.02))
+                rect = pygame.Rect(food.pos[0] * CELL_SIZE - size_mod//2, 
+                                 food.pos[1] * CELL_SIZE - size_mod//2,
+                                 CELL_SIZE + size_mod, CELL_SIZE + size_mod)
+            else:
+                rect = pygame.Rect(food.pos[0] * CELL_SIZE, food.pos[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            
+            pygame.draw.rect(self.screen, color, rect)
+            
+            # Icônes pour les power-ups
+            icon_color = WHITE if not self.night_mode else BLACK
+            if food.type == FRUIT_BONUS:
+                pygame.draw.circle(self.screen, icon_color, rect.center, 4)
+            elif food.type == FRUIT_TELEPORT:
+                pygame.draw.circle(self.screen, icon_color, rect.center, 8, 2)
+                pygame.draw.circle(self.screen, icon_color, rect.center, 4, 2)
+            elif food.type == FRUIT_INVINCIBLE:
+                points = [
+                    (rect.centerx, rect.centery - 6),
+                    (rect.centerx - 5, rect.centery + 4),
+                    (rect.centerx + 5, rect.centery + 4)
+                ]
+                pygame.draw.polygon(self.screen, icon_color, points)
+                
+        # Dessiner les snakes
+        self.draw_snake(self.snake1)
+        if self.multiplayer:
+            self.draw_snake(self.snake2)
+            
+        # Dessiner les particules
+        for particle in self.particles:
+            particle.draw(self.screen)
+            
+        # Dessiner les explosions
+        for explosion in self.explosions:
+            explosion.draw(self.screen)
+            
+        # Overlay de pause
+        if self.paused:
+            overlay = pygame.Surface((WIDTH, HEIGHT))
+            overlay.set_alpha(128)
+            overlay.fill(BLACK)
+            self.screen.blit(overlay, (0, 0))
+            
+            pause_text = self.big_font.render("PAUSE", True, WHITE)
+            pause_rect = pause_text.get_rect(center=(WIDTH//2, HEIGHT//2))
+            self.screen.blit(pause_text, pause_rect)
+            
+            instruction = self.small_font.render("Appuyez sur P pour continuer", True, WHITE)
+            instruction_rect = instruction.get_rect(center=(WIDTH//2, HEIGHT//2 + 50))
+            self.screen.blit(instruction, instruction_rect)
+            
+        # Interface utilisateur
+        self.draw_game_ui()
+        
+    def draw_game_ui(self):
+        text_color = WHITE if not self.night_mode else BLACK
+        
+        # Scores
+        if self.multiplayer:
+            if self.cooperative_mode:
+                total_score = self.score1 + self.score2
+                score_text = self.font.render(f"Score Équipe: {total_score}", True, text_color)
+                self.screen.blit(score_text, (10, 10))
+                score1_text = self.small_font.render(f"J1: {self.score1}", True, GREEN)
+                score2_text = self.small_font.render(f"J2: {self.score2}", True, BLUE)
+                self.screen.blit(score1_text, (10, 50))
+                self.screen.blit(score2_text, (10, 75))
+            else:
+                score1_text = self.font.render(f"Joueur 1: {self.score1}", True, GREEN)
+                score2_text = self.font.render(f"Joueur 2: {self.score2}", True, BLUE)
+                self.screen.blit(score1_text, (10, 10))
+                self.screen.blit(score2_text, (10, 50))
+        else:
+            score_text = self.font.render(f"Score: {self.score1}", True, text_color)
+            best_text = self.small_font.render(f"Meilleur: {self.best_score}", True, text_color)
+            self.screen.blit(score_text, (10, 10))
+            self.screen.blit(best_text, (10, 50))
+        
+        # Niveau et temps
+        level_text = self.small_font.render(f"Niveau: {self.level}", True, text_color)
+        elapsed = (pygame.time.get_ticks() - self.start_time) // 1000
+        time_text = self.small_font.render(f"Temps: {elapsed}s", True, text_color)
+        self.screen.blit(level_text, (10, 100))
+        self.screen.blit(time_text, (10, 125))
+        
+        # Mode survie - compte à rebours
+        if self.game_mode == MODE_SURVIVAL:
+            remaining = self.survival_timer // 60
+            survival_text = self.font.render(f"Temps restant: {remaining}s", True, RED)
+            survival_rect = survival_text.get_rect(center=(WIDTH//2, 50))
+            self.screen.blit(survival_text, survival_rect)
+        
+        # Indicateurs d'état
+        y_offset = 150
+        if self.sprinting1 or (self.multiplayer and self.sprinting2):
+            sprint_text = self.small_font.render("SPRINT!", True, text_color)
+            self.screen.blit(sprint_text, (10, y_offset))
+            y_offset += 25
+            
+        if self.slow_effect:
+            slow_text = self.small_font.render("RALENTI", True, GOLD)
+            self.screen.blit(slow_text, (10, y_offset))
+            y_offset += 25
+            
+        if self.snake1.ghost_timer > 0 or (self.multiplayer and self.snake2.ghost_timer > 0):
+            ghost_text = self.small_font.render("MODE FANTÔME", True, CYAN)
+            self.screen.blit(ghost_text, (10, y_offset))
+            y_offset += 25
+            
+        if self.snake1.invincible_timer > 0 or (self.multiplayer and self.snake2.invincible_timer > 0):
+            invincible_text = self.small_font.render("INVINCIBLE", True, YELLOW)
+            self.screen.blit(invincible_text, (10, y_offset))
+            y_offset += 25
+        
+        # Charges de téléportation
+        if self.snake1.teleport_charges > 0:
+            teleport_text = self.small_font.render(f"Téléportations: {self.snake1.teleport_charges}", True, PINK)
+            self.screen.blit(teleport_text, (10, y_offset))
+            y_offset += 25
+        
+        # Légende des power-ups (côté droit)
+        legend_x = WIDTH - 250
+        legend_texts = [
+            ("Rouge: +1 pt", RED),
+            ("Bleu: +5 pts", BLUE),
+            ("Or: Ralentit", GOLD),
+            ("Violet: Réduit", PURPLE),
+            ("Cyan: Fantôme", CYAN),
+            ("Orange: Vitesse", ORANGE),
+            ("Rose: Téléportation", PINK),
+            ("Jaune: Invincible", YELLOW)
+        ]
+        
+        for i, (text, color) in enumerate(legend_texts):
+            if self.night_mode:
+                color = tuple(255 - c for c in color)
+            legend_text = self.small_font.render(text, True, color)
+            self.screen.blit(legend_text, (legend_x, 10 + i * 22))
+            
+        # Mode de jeu
+        mode_names = ["Classique", "Portails", "Obstacles", "Survie", "Coopératif"]
+        mode_text = self.small_font.render(f"Mode: {mode_names[self.game_mode]}", True, text_color)
+        self.screen.blit(mode_text, (legend_x, 200))
+        
+        # Contrôles
+        controls = [
+            "P: Pause | N: Mode Nuit",
+            "T: Téléportation | Ctrl+S: Screenshot"
+        ]
+        if self.multiplayer:
+            controls.extend([
+                "J1: Flèches + ESPACE",
+                "J2: WASD + SHIFT"
+            ])
+        
+        for i, control in enumerate(controls):
+            control_text = self.small_font.render(control, True, text_color)
+            self.screen.blit(control_text, (legend_x, 230 + i * 20))
+        
+    def game_over(self):
+        # Arrêter l'enregistrement
+        self.recording = False
+        
+        # Mettre à jour les statistiques
+        self.games_played += 1
+        elapsed = (pygame.time.get_ticks() - self.start_time) // 1000
+        self.total_time += elapsed
+        
+        # Mode survie - victoire si temps écoulé
+        survival_victory = (self.game_mode == MODE_SURVIVAL and self.survival_timer <= 0)
+        
+        if self.score1 > self.best_score:
+            self.best_score = self.score1
+            
+        self.save_game_data()
+        
+        if not survival_victory and self.gameover_sound:
+            self.gameover_sound.play()
+            
+        # Écran de game over
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+        overlay.set_alpha(128)
+        overlay.fill(BLACK)
+        self.screen.blit(overlay, (0, 0))
+        
+        # Messages
+        if survival_victory:
+            victory_text = self.big_font.render("VICTOIRE!", True, GREEN)
+            victory_rect = victory_text.get_rect(center=(WIDTH//2, HEIGHT//2 - 100))
+            self.screen.blit(victory_text, victory_rect)
+        elif self.multiplayer:
+            if self.cooperative_mode:
+                total_score = self.score1 + self.score2
+                coop_text = self.big_font.render("PARTIE TERMINÉE", True, WHITE)
+                coop_rect = coop_text.get_rect(center=(WIDTH//2, HEIGHT//2 - 100))
+                self.screen.blit(coop_text, coop_rect)
+                score_text = self.font.render(f"Score Équipe: {total_score}", True, WHITE)
+            else:
+                if self.score1 > self.score2:
+                    winner_text = self.big_font.render("JOUEUR 1 GAGNE!", True, GREEN)
+                elif self.score2 > self.score1:
+                    winner_text = self.big_font.render("JOUEUR 2 GAGNE!", True, BLUE)
+                else:
+                    winner_text = self.big_font.render("ÉGALITÉ!", True, WHITE)
+                winner_rect = winner_text.get_rect(center=(WIDTH//2, HEIGHT//2 - 100))
+                self.screen.blit(winner_text, winner_rect)
+                score_text = self.font.render(f"J1: {self.score1} - J2: {self.score2}", True, WHITE)
+        else:
+            game_over_text = self.big_font.render("GAME OVER", True, WHITE)
+            game_over_rect = game_over_text.get_rect(center=(WIDTH//2, HEIGHT//2 - 100))
+            self.screen.blit(game_over_text, game_over_rect)
+            score_text = self.font.render(f"Score Final: {self.score1}", True, WHITE)
+            
+        if 'score_text' in locals():
+            score_rect = score_text.get_rect(center=(WIDTH//2, HEIGHT//2 - 50))
+            self.screen.blit(score_text, score_rect)
+        
+        # Statistiques
+        stats = [
+            f"Niveau Atteint: {self.level}",
+            f"Temps de Jeu: {elapsed}s",
+            f"Meilleur Score: {self.best_score}",
+            f"Parties Jouées: {self.games_played}",
+            f"Temps Total: {self.total_time//60}min"
+        ]
+        
+        for i, stat in enumerate(stats):
+            stat_text = self.small_font.render(stat, True, WHITE)
+            stat_rect = stat_text.get_rect(center=(WIDTH//2, HEIGHT//2 + i * 25))
+            self.screen.blit(stat_text, stat_rect)
+            
+        restart_text = self.small_font.render("ESPACE: Menu | ECHAP: Quitter", True, WHITE)
+        restart_rect = restart_text.get_rect(center=(WIDTH//2, HEIGHT//2 + 150))
+        self.screen.blit(restart_text, restart_rect)
+        
+        pygame.display.flip()
+        
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    return False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    self.in_menu = True
+                    return True
+                    
+    def run(self):
+        running = True
+        while running:
+            if self.in_menu:
+                if not self.handle_menu_events():
+                    break
+                self.draw_menu()
+            else:
+                if not self.handle_game_events():
+                    break
+                    
+                if not self.update_game():
+                    if not self.game_over():
+                        break
+                    continue
+                    
+                self.draw_game()
+                
+                # Vitesse adaptative
+                if not self.paused:
+                    speed1 = self.get_current_speed(self.snake1, self.sprinting1)
+                    if self.multiplayer:
+                        speed2 = self.get_current_speed(self.snake2, self.sprinting2)
+                        speed = max(speed1, speed2)
+                    else:
+                        speed = speed1
+                        
+                    self.clock.tick(speed)
+            
+            pygame.display.flip()
+            
+        pygame.quit()
+        sys.exit()
+
+if __name__ == "__main__":
+    game = Game()
+    game.run()
