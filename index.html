@@ -339,6 +339,169 @@
             font-weight: bold;
             text-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
         }
+        
+        .help-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .help-modal.active {
+            display: flex;
+        }
+        
+        .help-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 25px;
+            padding: 25px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+        
+        .help-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .help-title {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .close-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .close-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .help-section {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 15px;
+            margin-bottom: 15px;
+            color: white;
+        }
+        
+        .help-section h3 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .fruit-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .fruit-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px;
+            border-radius: 12px;
+        }
+        
+        .fruit-visual {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            flex-shrink: 0;
+            box-shadow: 0 0 15px currentColor;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        
+        .fruit-info {
+            flex: 1;
+        }
+        
+        .fruit-name {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+        
+        .fruit-desc {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .controls-help {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 10px;
+        }
+        
+        .control-icon {
+            font-size: 24px;
+            width: 35px;
+            text-align: center;
+        }
+        
+        .tips-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .tip-item {
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
@@ -375,6 +538,7 @@
             <div class="action-row">
                 <button class="btn" id="playBtn">🎮 Jouer</button>
                 <button class="btn" id="pauseBtn">⏸️ Pause</button>
+                <button class="btn" id="helpBtn">❓ Aide</button>
                 <button class="btn" id="teleportBtn" disabled>🌀</button>
             </div>
             
@@ -415,6 +579,119 @@
                 <div class="legend-item">
                     <div class="fruit-icon" style="background: #ffff00"></div>
                     <span>Jaune Invincible</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="help-modal" id="helpModal">
+        <div class="help-content">
+            <div class="help-header">
+                <div class="help-title">📖 Guide du Jeu</div>
+                <button class="close-btn" id="closeHelp">✕</button>
+            </div>
+            
+            <div class="help-section">
+                <h3>🎯 Objectif</h3>
+                <div class="controls-help">
+                    <p>Mangez des fruits pour grandir et marquer des points. Évitez de vous mordre et de toucher les bords !</p>
+                </div>
+            </div>
+            
+            <div class="help-section">
+                <h3>🕹️ Contrôles</h3>
+                <div class="controls-help">
+                    <div class="control-item">
+                        <div class="control-icon">⬆️⬇️⬅️➡️</div>
+                        <div>Utilisez les flèches ou glissez sur l'écran pour diriger le serpent</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-icon">🚀</div>
+                        <div>Maintenez SPRINT pour aller plus vite</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-icon">🌀</div>
+                        <div>Téléportation à une position aléatoire (consomme une charge)</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="help-section">
+                <h3>🍎 Fruits & Effets</h3>
+                <div class="fruit-list">
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #ff0000; color: #ff0000;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🔴 Fruit Rouge</div>
+                            <div class="fruit-desc">+1 point - Fruit standard</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #0066ff; color: #0066ff;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🔵 Fruit Bleu</div>
+                            <div class="fruit-desc">+5 points - Bonus de score !</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #800080; color: #800080;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🟣 Fruit Violet</div>
+                            <div class="fruit-desc">+3 points - Réduit la taille du serpent de 4 segments</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #00ffff; color: #00ffff;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🔵 Fruit Cyan</div>
+                            <div class="fruit-desc">+4 points - Mode Fantôme : traversez votre propre corps !</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #ff69b4; color: #ff69b4;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🩷 Fruit Rose</div>
+                            <div class="fruit-desc">+6 points - Gagnez 2 charges de téléportation</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fruit-item">
+                        <div class="fruit-visual" style="background: #ffff00; color: #ffff00;">⬛</div>
+                        <div class="fruit-info">
+                            <div class="fruit-name">🟡 Fruit Jaune</div>
+                            <div class="fruit-desc">+8 points - Invincible : traversez les bords et votre corps !</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="help-section">
+                <h3>💡 Astuces</h3>
+                <div class="tips-list">
+                    <div class="tip-item">
+                        <span>🎯</span>
+                        <span>Priorisez les fruits bleus et jaunes pour maximiser votre score</span>
+                    </div>
+                    <div class="tip-item">
+                        <span>🐌</span>
+                        <span>Le fruit violet est utile quand vous êtes trop long</span>
+                    </div>
+                    <div class="tip-item">
+                        <span>👻</span>
+                        <span>Utilisez le mode fantôme pour sortir de situations difficiles</span>
+                    </div>
+                    <div class="tip-item">
+                        <span>🌀</span>
+                        <span>Gardez vos téléportations pour les urgences</span>
+                    </div>
+                    <div class="tip-item">
+                        <span>🚀</span>
+                        <span>Le sprint vous fait aller 2x plus vite mais c'est plus risqué</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -523,6 +800,23 @@
         document.getElementById('playBtn').addEventListener('click', startGame);
         document.getElementById('pauseBtn').addEventListener('click', togglePause);
         document.getElementById('teleportBtn').addEventListener('click', useTeleport);
+        document.getElementById('helpBtn').addEventListener('click', showHelp);
+        document.getElementById('closeHelp').addEventListener('click', hideHelp);
+        
+        // Fermer l'aide en cliquant en dehors
+        document.getElementById('helpModal').addEventListener('click', (e) => {
+            if (e.target.id === 'helpModal') {
+                hideHelp();
+            }
+        });
+        
+        function showHelp() {
+            document.getElementById('helpModal').classList.add('active');
+        }
+        
+        function hideHelp() {
+            document.getElementById('helpModal').classList.remove('active');
+        }
         
         function startGame() {
             game.snake = [{x: 12, y: 12}];
